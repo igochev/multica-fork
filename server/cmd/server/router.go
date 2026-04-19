@@ -274,6 +274,17 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 				})
 			})
 
+			// Pipelines
+			r.Route("/api/pipelines", func(r chi.Router) {
+				r.Get("/", h.ListPipelines)
+				r.Post("/", h.CreatePipeline)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetPipeline)
+					r.Put("/", h.UpdatePipeline)
+					r.Delete("/", h.DeletePipeline)
+				})
+			})
+
 			// Pins
 			r.Route("/api/pins", func(r chi.Router) {
 				r.Get("/", h.ListPins)

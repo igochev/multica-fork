@@ -56,6 +56,12 @@
 **Key insight:** The daemon doesn't replace agents — it spawns them as subprocesses. Your existing
 OpenClaw (Discord bot) and Hermes setups stay untouched. Multica adds the task queue + web UI.
 
+### Core Architecture Docs
+
+- `docs/architecture/elite-mission-control.md` — constitution and redesign principles for the fork
+- `docs/architecture/overseer-design-spec.md` — explicit Overseer control-plane design
+- `SPEC-STAGE-ROUTING.md` — Phase 1 deterministic stage-routing backbone
+
 ---
 
 ## Branch Architecture

@@ -271,6 +271,15 @@ type IssueLabel struct {
 	Color       string      `json:"color"`
 }
 
+type IssuePipeline struct {
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	PipelineID     pgtype.UUID        `json:"pipeline_id"`
+	CurrentStageID pgtype.UUID        `json:"current_stage_id"`
+	StageSequence  int32              `json:"stage_sequence"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueReaction struct {
 	ID          pgtype.UUID        `json:"id"`
 	IssueID     pgtype.UUID        `json:"issue_id"`
@@ -324,6 +333,27 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Pipeline struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PipelineStage struct {
+	ID                pgtype.UUID        `json:"id"`
+	PipelineID        pgtype.UUID        `json:"pipeline_id"`
+	Name              string             `json:"name"`
+	Status            string             `json:"status"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	StageInstructions pgtype.Text        `json:"stage_instructions"`
+	Position          int32              `json:"position"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Project struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -336,6 +366,21 @@ type Project struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Priority    string             `json:"priority"`
+}
+
+type ProjectControlSetting struct {
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	OverseerAgentID     pgtype.UUID        `json:"overseer_agent_id"`
+	DefaultPipelineID   pgtype.UUID        `json:"default_pipeline_id"`
+	AutomationMode      string             `json:"automation_mode"`
+	AutoTriageEnabled   bool               `json:"auto_triage_enabled"`
+	AutoRouteEnabled    bool               `json:"auto_route_enabled"`
+	AutoEscalateBlocked bool               `json:"auto_escalate_blocked"`
+	StaleAfterMinutes   int32              `json:"stale_after_minutes"`
+	ReviewPolicy        []byte             `json:"review_policy"`
+	QualityPolicy       []byte             `json:"quality_policy"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Skill struct {

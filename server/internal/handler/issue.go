@@ -1138,6 +1138,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	}
 
+	if statusChanged && h.PipelineService != nil {
+		if _, err := h.PipelineService.MaybeAdvanceIssuePipeline(r.Context(), issue); err != nil {
+			slog.Warn("advance issue pipeline failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 

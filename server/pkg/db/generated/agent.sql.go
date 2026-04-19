@@ -50,40 +50,6 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 	return i, err
 }
 
-const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
-UPDATE agent SET mcp_config = NULL, updated_at = now()
-WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config
-`
-
-func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agent, error) {
-	row := q.db.QueryRow(ctx, clearAgentMcpConfig, id)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Name,
-		&i.AvatarUrl,
-		&i.RuntimeMode,
-		&i.RuntimeConfig,
-		&i.Visibility,
-		&i.Status,
-		&i.MaxConcurrentTasks,
-		&i.OwnerID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Description,
-		&i.RuntimeID,
-		&i.Instructions,
-		&i.ArchivedAt,
-		&i.ArchivedBy,
-		&i.CustomEnv,
-		&i.CustomArgs,
-		&i.McpConfig,
-	)
-	return i, err
-}
-
 const cancelAgentTask = `-- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
@@ -188,6 +154,40 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 		&i.TriggerCommentID,
 		&i.ChatSessionID,
 		&i.AutopilotRunID,
+	)
+	return i, err
+}
+
+const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
+UPDATE agent SET mcp_config = NULL, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config
+`
+
+func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, clearAgentMcpConfig, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
 	)
 	return i, err
 }

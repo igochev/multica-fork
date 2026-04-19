@@ -26,6 +26,11 @@ type TaskService struct {
 	Bus     *events.Bus
 }
 
+type taskAgentQueries interface {
+	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
+	CreateAgentTask(ctx context.Context, arg db.CreateAgentTaskParams) (db.AgentTaskQueue, error)
+}
+
 func NewTaskService(q *db.Queries, hub *realtime.Hub, bus *events.Bus) *TaskService {
 	return &TaskService{Queries: q, Hub: hub, Bus: bus}
 }
@@ -39,9 +44,20 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
 	}
 
-	agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
+	return s.EnqueueTaskForAgentIssue(ctx, issue, issue.AssigneeID, triggerCommentID...)
+}
+
+// EnqueueTaskForAgentIssue creates a queued task for an explicitly selected
+// agent on an issue. It reuses the same queue semantics as assignee-driven
+// issue task creation without requiring the issue assignee to change.
+func (s *TaskService) EnqueueTaskForAgentIssue(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	return enqueueTaskForAgentIssue(ctx, s.Queries, issue, agentID, triggerCommentID...)
+}
+
+func enqueueTaskForAgentIssue(ctx context.Context, queries taskAgentQueries, issue db.Issue, agentID pgtype.UUID, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
+	agent, err := queries.GetAgent(ctx, agentID)
 	if err != nil {
-		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
 	}
 	if agent.ArchivedAt.Valid {
@@ -49,7 +65,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
 	if !agent.RuntimeID.Valid {
-		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
+		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
@@ -58,19 +74,19 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 		commentID = triggerCommentID[0]
 	}
 
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:          issue.AssigneeID,
+	task, err := queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:          agentID,
 		RuntimeID:        agent.RuntimeID,
 		IssueID:          issue.ID,
 		Priority:         priorityToInt(issue.Priority),
 		TriggerCommentID: commentID,
 	})
 	if err != nil {
-		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+	slog.Info("task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 	return task, nil
 }
 
@@ -78,34 +94,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	agent, err := s.Queries.GetAgent(ctx, agentID)
-	if err != nil {
-		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
-		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
-	}
-	if agent.ArchivedAt.Valid {
-		slog.Debug("mention task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
-	}
-	if !agent.RuntimeID.Valid {
-		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
-	}
-
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-		AgentID:          agentID,
-		RuntimeID:        agent.RuntimeID,
-		IssueID:          issue.ID,
-		Priority:         priorityToInt(issue.Priority),
-		TriggerCommentID: triggerCommentID,
-	})
-	if err != nil {
-		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
-		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
-	}
-
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-	return task, nil
+	return s.EnqueueTaskForAgentIssue(ctx, issue, agentID, triggerCommentID)
 }
 
 // EnqueueChatTask creates a queued task for a chat session.

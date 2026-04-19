@@ -1,0 +1,3 @@
+DROP TRIGGER IF EXISTS trg_project_control_settings_workspace_match ON project_control_settings;
+DROP FUNCTION IF EXISTS ensure_project_control_settings_workspace_match();
+DROP TABLE IF EXISTS project_control_settings;

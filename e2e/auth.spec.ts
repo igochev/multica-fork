@@ -5,19 +5,17 @@ test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
     await page.goto("/login");
 
-    await expect(page.locator("h1")).toContainText("Multica");
-    await expect(page.locator('input[placeholder="Email"]')).toBeVisible();
-    await expect(page.locator('input[placeholder="Name"]')).toBeVisible();
-    await expect(page.locator('button[type="submit"]')).toContainText(
-      "Sign in",
-    );
+    await expect(page.getByText(/sign in to multica/i)).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Continue" })).toBeVisible();
   });
 
   test("login and redirect to /issues", async ({ page }) => {
     await loginAsDefault(page);
 
     await expect(page).toHaveURL(/\/issues/);
-    await expect(page.locator("text=All Issues")).toBeVisible();
+    await expect(page.getByText("Issues").first()).toBeVisible();
+    await expect(page.getByText(/No issues yet|Backlog/)).toBeVisible();
   });
 
   test("unauthenticated user is redirected to /login", async ({ page }) => {

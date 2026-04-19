@@ -530,7 +530,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   <label className="text-xs font-medium text-muted-foreground">Automation mode</label>
                   <Select
                     value={projectControl.automation_mode}
-                    onValueChange={(value) => handleUpdateControl({ automation_mode: value })}
+                    onValueChange={(value) => {
+                      if (value) handleUpdateControl({ automation_mode: value });
+                    }}
                   >
                     <SelectTrigger className="w-full" aria-label="Automation mode">
                       <SelectValue>{getAutomationModeLabel(projectControl.automation_mode)}</SelectValue>

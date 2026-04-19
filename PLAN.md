@@ -3,7 +3,7 @@
 > **Project:** `~/.openclaw/workspace-coding/projects/multica-fork/`
 > **Fork:** `https://github.com/igochev/multica-fork`
 > **Upstream:** `https://github.com/multica-ai/multica`
-> **Last updated:** 2026-04-18
+> **Last updated:** 2026-04-19
 
 ---
 
@@ -56,10 +56,36 @@
 **Key insight:** The daemon doesn't replace agents — it spawns them as subprocesses. Your existing
 OpenClaw (Discord bot) and Hermes setups stay untouched. Multica adds the task queue + web UI.
 
+### Elite Mission Control — 5 Role Model
+
+The fork implements 5 distinct agent roles. Each role has a **prompt contract** configured via the
+`AgentInstructions` field in Multica UI (Settings → Agents → edit agent → Instructions).
+These prompts are injected into `CLAUDE.md` at task start — no daemon changes needed.
+
+| Role | Multica Agent | What it does | Key Prompt Instruction |
+|---|---|---|---|
+| **Overseer (CEO)** | "Overseer Agent" | Strategic scanning, opportunity identification, creates user-story-level issues | `scan project for X, Y, Z; create issues` |
+| **Planning Agent** | (same as Builder) | Converts issue → detailed plan before building | `invoke writing-plans skill first; write plan to docs/plans/` |
+| **Builder** | "Hermes Builder" | Executes the plan from Planning Agent | `follow the plan; run TDD; test before commit` |
+| **Reviewer** | (same as Builder) | Validates builder output against the plan | `requesting-code-review skill; compare against plan` |
+| **Knowledge Manager** | "Documentation Agent" | Weekly doc maintenance, ARCHITECTURE.md hygiene | `audit docs weekly; flag inconsistencies as issues` |
+
+**Planning happens inside `in_progress`** — no new Kanban phase needed. "In progress" semantically
+means: analyze → plan → execute. The Builder does this in order. No UI/UX changes required.
+
+**AgentInstructions flow:**
+```
+Multica UI (Settings → Agents → Instructions field)
+    → stored in DB (agents.instructions)
+    → daemon writes to .agent_context/issue_context.md + CLAUDE.md at task start
+    → Hermes reads CLAUDE.md and follows the instructions
+```
+
 ### Core Architecture Docs
 
 - `docs/architecture/elite-mission-control.md` — constitution and redesign principles for the fork
-- `docs/architecture/overseer-design-spec.md` — explicit Overseer control-plane design
+- `docs/architecture/overseer-strategic-ceo-spec.md` — **canonical** strategic Overseer (CEO) design
+- `docs/architecture/overseer-design-spec.md` — reactive Overseer (legacy, superseded by strategic spec)
 - `SPEC-STAGE-ROUTING.md` — Phase 1 deterministic stage-routing backbone
 
 ---
@@ -361,13 +387,99 @@ multica daemon start --profile staging
 
 These are features we want to add or redesign in our fork:
 
-1. **Skills compounding** — persistent reusable skills indexed semantically (pgvector)
-2. **Proactive agent blocker reporting** — agents report blockers autonomously vs reactive callbacks only
-3. **Mission Control integration layer** — tighter hooks into OpenClaw/Hermes beyond current daemon dispatch
-4. **Elite UI/UX** — redesign dashboard, board, and agent panels to best-in-class
-5. **Stronger DoR/DoD enforcement** — configurable checklist-driven gates before column transitions
-6. **Execution reconciliation dashboard** — stale detection + admin reconciliation UI
-7. **Bidirectional lifecycle loop** — full closed-loop: MC → agent → callback → MC state update
+1. ~~Proactive agent blocker reporting~~ — ✅ DONE in Task 9 (reactive blocked/stale escalation)
+2. **Strategic Overseer (CEO)** — proactive opportunity scanning + issue creation (see `overseer-strategic-ceo-spec.md`)
+3. **Planning Agent integration** — Builder uses `AgentInstructions` to call `writing-plans` before coding (no daemon change)
+4. **Plan-as-review-contract** — Reviewer validates against the plan file, not just code quality
+5. **Knowledge Manager role** — weekly documentation maintenance cron
+6. **Skills compounding** — persistent reusable skills indexed semantically (pgvector) — future
+7. **Elite UI/UX** — redesign dashboard, board, and agent panels to best-in-class — future
+8. **Per-project Overseer config** — `overseer_config` JSONB column on `project_control_settings` — future
+9. **Bidirectional lifecycle loop** — full closed-loop: MC → agent → callback → MC state update — future
+
+### Key Verdicts (2026-04-19)
+
+| Question | Decision |
+|---|---|
+| New Kanban phase for PLAN? | **No** — planning happens inside `in_progress`. "In progress" = analyze + plan + execute. |
+| Daemon change needed for planning? | **No** — use `AgentInstructions` field. Written to CLAUDE.md at task start. |
+| Overseer = watchdog or CEO? | **CEO** — strategic opportunity identification. Reactive stale/blocked detection is a bonus, not the core value. |
+| RAG needed now? | **No** — Layer 1 (markdown docs) is sufficient. Layer 2 (lancedb + Ollama embeddings) when pain threshold reached. |
+| New agents needed for roles? | **No** — roles are prompts/config, not new bots. Hermes + OpenClaw cover all 5 roles. |
+| Multica plans/ folder for execution? | **Yes** — `docs/plans/{issue-slug}.md` is where Builder writes plans. Feeds the Reviewer. |
+
+---
+
+## Agent Instructions Configuration Guide
+
+### How It Works
+
+1. Go to Multica UI → Settings → Agents → edit any agent
+2. Fill the **Instructions** field (text area)
+3. The daemon writes this into `CLAUDE.md` in the task workdir at task start
+4. The agent (Hermes, Codex, etc.) reads CLAUDE.md and follows the instructions
+
+### Builder Agent Instructions (Canonical Prompt)
+
+```markdown
+You are the Builder agent for Elite Mission Control.
+
+RULES (non-negotiable — every time):
+1. When you receive an issue, IMMEDIATELY invoke the `writing-plans` skill.
+2. Read the issue description carefully.
+3. Create a detailed plan at `docs/plans/{issue-slug}.md`.
+   Include: task breakdown, exact file paths, test approach, review criteria.
+4. Write the plan back into the issue as a comment so the Reviewer can validate it.
+5. Execute the plan task by task. Run tests after each task.
+6. If tests fail: invoke `systematic-debugging` — NO fixes without root cause.
+7. After all tasks pass: invoke `requesting-code-review`.
+8. The Reviewer will compare your work against the plan file.
+9. Fix any deviations the Reviewer identifies before marking complete.
+
+Never start coding before the plan file exists and is written to the issue.
+```
+
+### Overseer Agent Instructions (Canonical Prompt)
+
+```markdown
+You are the Overseer (CEO) for this project.
+
+EVERY 6-24 HOURS (per your schedule):
+1. Read the codebase delta since last run (new/changed files, new dependencies).
+2. Read the board state (backlog size, stalled items, blocked issues).
+3. Read ARCHITECTURE.md and DECISIONS.md for current project direction.
+4. Look for:
+   - Security: new CVEs in dependencies, hardcoded secrets, unsafe patterns
+   - Test coverage: files >300 lines with <50% coverage
+   - Code quality: duplication, missing error handling, god files
+   - Documentation: undocumented public APIs, outdated README
+   - Architecture: violations of ARCHITECTURE.md
+   - UX: missing inline help, accessibility gaps
+5. Create user-story-level issues (not implementation-level) — include:
+   - What the problem/opportunity is
+   - Why it matters to the project
+   - Estimated effort (rough)
+6. Maximum 3 new issues per run. Prioritize by project `overseer_config` weights.
+7. Do NOT write code. Do NOT create detailed plans.
+
+Report what you found in a summary comment on the project.
+```
+
+### Knowledge Manager Instructions (Canonical Prompt)
+
+```markdown
+You are the Knowledge Manager for this project.
+
+EVERY WEEK:
+1. Check ARCHITECTURE.md — does it match actual code structure?
+2. Check PLAN.md — archive completed items, flag stale gaps.
+3. Check docs/API.md — new public handlers without API docs?
+4. Check inline comments — any contradict the code?
+5. Check CHANGELOG — updated since last release?
+6. Flag all issues as documentation maintenance tickets (do NOT fix yourself).
+
+Output a brief report of what needs attention.
+```
 
 ---
 
@@ -395,4 +507,9 @@ git branch  # should show * multica-my-feats-dev
 git log --oneline -3
 ```
 
-**Last session's work:** Setting up initial infrastructure (Docker + CLI + daemon). Next step is to run the server and connect agents.
+**Last session's work (2026-04-19):** Completed Tasks 1-9 of elite-mission-control-stage-routing-overseer-o1 plan.
+Pipeline routing + reactive Overseer (blocked/stale escalation) built and committed.
+Major design decision: Overseer = strategic CEO role, not reactive cron.
+New spec written: `docs/architecture/overseer-strategic-ceo-spec.md`.
+AgentInstructions discovery: no daemon changes needed for Planning Agent — just configure the prompt.
+Next step: configure Hermes Builder AgentInstructions in Multica UI, test with a 1-line issue.

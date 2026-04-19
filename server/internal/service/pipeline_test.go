@@ -56,21 +56,60 @@ func TestPipelineResolveEffectivePipelineForIssueUsesExplicitIssuePipeline(t *te
 	}
 }
 
-func TestPipelineResolveEffectivePipelineForIssueBlocksProjectFallbackUntilSchemaExists(t *testing.T) {
-	issue := db.Issue{
-		ID:          testUUID(6),
-		WorkspaceID: testUUID(7),
-		ProjectID:   testUUID(8),
+func TestPipelineResolveEffectivePipelineForIssueUsesProjectDefaultPipelineFallback(t *testing.T) {
+	issueID := testUUID(6)
+	workspaceID := testUUID(7)
+	projectID := testUUID(8)
+	pipelineID := testUUID(9)
+	currentStageID := testUUID(10)
+	nextStageID := testUUID(11)
+
+	queries := &fakePipelineQueries{
+		issuePipelineErr: pgx.ErrNoRows,
+		projectControl: db.GetProjectControlSettingsRow{
+			ProjectID:         projectID,
+			DefaultPipelineID: pipelineID,
+		},
+		pipeline: db.Pipeline{
+			ID:          pipelineID,
+			WorkspaceID: workspaceID,
+			Name:        "Project Default Pipeline",
+		},
+		stages: []db.PipelineStage{
+			{ID: nextStageID, PipelineID: pipelineID, Name: "Review", Position: 2},
+			{ID: currentStageID, PipelineID: pipelineID, Name: "Build", Position: 1},
+		},
+		createdIssuePipeline: db.IssuePipeline{
+			IssueID:        issueID,
+			PipelineID:     pipelineID,
+			CurrentStageID: currentStageID,
+			StageSequence:  0,
+		},
 	}
-	queries := &fakePipelineQueries{issuePipelineErr: pgx.ErrNoRows}
 	svc := &PipelineService{queries: queries, taskSvc: &fakeTaskEnqueuer{}}
+	issue := db.Issue{ID: issueID, WorkspaceID: workspaceID, ProjectID: projectID}
 
 	resolved, err := svc.ResolveEffectivePipelineForIssue(context.Background(), issue)
-	if resolved != nil {
-		t.Fatalf("expected nil resolved pipeline, got %#v", resolved)
+	if err != nil {
+		t.Fatalf("ResolveEffectivePipelineForIssue returned error: %v", err)
 	}
-	if !errors.Is(err, ErrProjectControlSettingsUnavailable) {
-		t.Fatalf("expected ErrProjectControlSettingsUnavailable, got %v", err)
+	if resolved == nil {
+		t.Fatalf("expected resolved pipeline, got nil")
+	}
+	if !queries.createIssuePipelineCalled {
+		t.Fatalf("expected CreateIssuePipeline to be called for project default fallback")
+	}
+	if queries.createIssuePipelineParams.IssueID != issueID {
+		t.Fatalf("expected fallback issue pipeline issue %v, got %v", issueID, queries.createIssuePipelineParams.IssueID)
+	}
+	if queries.createIssuePipelineParams.PipelineID != pipelineID {
+		t.Fatalf("expected fallback pipeline %v, got %v", pipelineID, queries.createIssuePipelineParams.PipelineID)
+	}
+	if queries.createIssuePipelineParams.CurrentStageID != currentStageID {
+		t.Fatalf("expected fallback current stage %v, got %v", currentStageID, queries.createIssuePipelineParams.CurrentStageID)
+	}
+	if resolved.CurrentStage.ID != currentStageID {
+		t.Fatalf("expected current stage %v, got %v", currentStageID, resolved.CurrentStage.ID)
 	}
 }
 
@@ -406,22 +445,28 @@ func TestPipelineEnqueueTaskForAgentIssueUsesExplicitAgent(t *testing.T) {
 }
 
 type fakePipelineQueries struct {
-	issuePipeline            db.IssuePipeline
-	issuePipelineErr         error
-	pipeline                 db.Pipeline
-	pipelineErr              error
-	stages                   []db.PipelineStage
-	stagesErr                error
-	nextStage                db.PipelineStage
-	nextStageErr             error
-	advancedIssuePipeline    db.IssuePipeline
-	advanceErr               error
-	advanceParams            db.AdvanceIssuePipelineStageParams
-	advanceCalls             []db.AdvanceIssuePipelineStageParams
-	advanceCtxErrs           []error
-	advanceResults           []db.IssuePipeline
-	advanceErrors            []error
-	rejectCanceledAdvanceCtx bool
+	issuePipeline             db.IssuePipeline
+	issuePipelineErr          error
+	projectControl            db.GetProjectControlSettingsRow
+	projectControlErr         error
+	createdIssuePipeline      db.IssuePipeline
+	createIssuePipelineErr    error
+	createIssuePipelineParams db.CreateIssuePipelineParams
+	createIssuePipelineCalled bool
+	pipeline                  db.Pipeline
+	pipelineErr               error
+	stages                    []db.PipelineStage
+	stagesErr                 error
+	nextStage                 db.PipelineStage
+	nextStageErr              error
+	advancedIssuePipeline     db.IssuePipeline
+	advanceErr                error
+	advanceParams             db.AdvanceIssuePipelineStageParams
+	advanceCalls              []db.AdvanceIssuePipelineStageParams
+	advanceCtxErrs            []error
+	advanceResults            []db.IssuePipeline
+	advanceErrors             []error
+	rejectCanceledAdvanceCtx  bool
 }
 
 func (f *fakePipelineQueries) GetIssuePipeline(_ context.Context, _ pgtype.UUID) (db.IssuePipeline, error) {
@@ -429,6 +474,22 @@ func (f *fakePipelineQueries) GetIssuePipeline(_ context.Context, _ pgtype.UUID)
 		return db.IssuePipeline{}, f.issuePipelineErr
 	}
 	return f.issuePipeline, nil
+}
+
+func (f *fakePipelineQueries) CreateIssuePipeline(_ context.Context, arg db.CreateIssuePipelineParams) (db.IssuePipeline, error) {
+	f.createIssuePipelineCalled = true
+	f.createIssuePipelineParams = arg
+	if f.createIssuePipelineErr != nil {
+		return db.IssuePipeline{}, f.createIssuePipelineErr
+	}
+	return f.createdIssuePipeline, nil
+}
+
+func (f *fakePipelineQueries) GetProjectControlSettings(_ context.Context, _ pgtype.UUID) (db.GetProjectControlSettingsRow, error) {
+	if f.projectControlErr != nil {
+		return db.GetProjectControlSettingsRow{}, f.projectControlErr
+	}
+	return f.projectControl, nil
 }
 
 func (f *fakePipelineQueries) GetPipelineInWorkspace(_ context.Context, _ db.GetPipelineInWorkspaceParams) (db.Pipeline, error) {

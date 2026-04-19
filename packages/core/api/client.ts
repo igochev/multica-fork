@@ -51,6 +51,7 @@ import type {
   ProjectControl,
   UpdateProjectControlRequest,
   ReconcileProjectControlResponse,
+  ReconcileProjectOverseerResponse,
   Pipeline,
   CreatePipelineRequest,
   UpdatePipelineRequest,
@@ -820,6 +821,12 @@ export class ApiClient {
 
   async reconcileProjectControl(id: string): Promise<ReconcileProjectControlResponse> {
     return this.fetch(`/api/projects/${id}/control/reconcile`, {
+      method: "POST",
+    });
+  }
+
+  async reconcileProjectOverseer(id: string): Promise<ReconcileProjectOverseerResponse> {
+    return this.fetch(`/api/projects/${id}/control/overseer/reconcile`, {
       method: "POST",
     });
   }

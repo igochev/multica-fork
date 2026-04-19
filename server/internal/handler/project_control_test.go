@@ -11,19 +11,32 @@ import (
 	"time"
 )
 
+type projectOverseerAutonomyResponse struct {
+	AutopilotID string  `json:"autopilot_id"`
+	Status      string  `json:"status"`
+	TriggerID   *string `json:"trigger_id"`
+	NextRunAt   *string `json:"next_run_at"`
+}
+
 type projectControlResponse struct {
-	ProjectID           string          `json:"project_id"`
-	OverseerAgentID     *string         `json:"overseer_agent_id"`
-	DefaultPipelineID   *string         `json:"default_pipeline_id"`
-	AutomationMode      string          `json:"automation_mode"`
-	AutoTriageEnabled   bool            `json:"auto_triage_enabled"`
-	AutoRouteEnabled    bool            `json:"auto_route_enabled"`
-	AutoEscalateBlocked bool            `json:"auto_escalate_blocked"`
-	StaleAfterMinutes   int32           `json:"stale_after_minutes"`
-	ReviewPolicy        json.RawMessage `json:"review_policy"`
-	QualityPolicy       json.RawMessage `json:"quality_policy"`
-	CreatedAt           string          `json:"created_at"`
-	UpdatedAt           string          `json:"updated_at"`
+	ProjectID                  string                           `json:"project_id"`
+	OverseerAgentID            *string                          `json:"overseer_agent_id"`
+	OverseerAutopilotID        *string                          `json:"overseer_autopilot_id"`
+	OverseerAutonomyStatus     *string                          `json:"overseer_autonomy_status"`
+	OverseerAutonomyTriggerID  *string                          `json:"overseer_autonomy_trigger_id"`
+	OverseerAutonomyNextRunAt  *string                          `json:"overseer_autonomy_next_run_at"`
+	OverseerAutonomy           *projectOverseerAutonomyResponse `json:"overseer_autonomy"`
+	DefaultPipelineID          *string                          `json:"default_pipeline_id"`
+	AutomationMode             string                           `json:"automation_mode"`
+	AutoTriageEnabled          bool                             `json:"auto_triage_enabled"`
+	AutoRouteEnabled           bool                             `json:"auto_route_enabled"`
+	AutoEscalateBlocked        bool                             `json:"auto_escalate_blocked"`
+	StaleAfterMinutes          int32                            `json:"stale_after_minutes"`
+	ReviewPolicy               json.RawMessage                  `json:"review_policy"`
+	QualityPolicy              json.RawMessage                  `json:"quality_policy"`
+	OverseerConfig             json.RawMessage                  `json:"overseer_config"`
+	CreatedAt                  string                           `json:"created_at"`
+	UpdatedAt                  string                           `json:"updated_at"`
 }
 
 type getProjectControlHandler interface {
@@ -134,6 +147,21 @@ func TestProjectControlGet(t *testing.T) {
 	if got.OverseerAgentID != nil {
 		t.Fatalf("GetProjectControl: expected nil overseer_agent_id, got %v", *got.OverseerAgentID)
 	}
+	if got.OverseerAutopilotID != nil {
+		t.Fatalf("GetProjectControl: expected nil overseer_autopilot_id, got %v", *got.OverseerAutopilotID)
+	}
+	if got.OverseerAutonomyStatus != nil {
+		t.Fatalf("GetProjectControl: expected nil overseer_autonomy_status, got %v", *got.OverseerAutonomyStatus)
+	}
+	if got.OverseerAutonomyTriggerID != nil {
+		t.Fatalf("GetProjectControl: expected nil overseer_autonomy_trigger_id, got %v", *got.OverseerAutonomyTriggerID)
+	}
+	if got.OverseerAutonomyNextRunAt != nil {
+		t.Fatalf("GetProjectControl: expected nil overseer_autonomy_next_run_at, got %v", *got.OverseerAutonomyNextRunAt)
+	}
+	if got.OverseerAutonomy != nil {
+		t.Fatalf("GetProjectControl: expected nil overseer_autonomy, got %+v", got.OverseerAutonomy)
+	}
 	if got.DefaultPipelineID != nil {
 		t.Fatalf("GetProjectControl: expected nil default_pipeline_id, got %v", *got.DefaultPipelineID)
 	}
@@ -154,6 +182,7 @@ func TestProjectControlGet(t *testing.T) {
 	}
 	assertJSONEqual(t, got.ReviewPolicy, `{}`)
 	assertJSONEqual(t, got.QualityPolicy, `{}`)
+	assertJSONEqual(t, got.OverseerConfig, `{}`)
 	if got.CreatedAt == "" {
 		t.Fatal("GetProjectControl: expected created_at to be populated")
 	}
@@ -183,6 +212,19 @@ func TestProjectControlUpsert(t *testing.T) {
 		"stale_after_minutes":   120,
 		"review_policy":         map[string]any{"required_reviewers": 2},
 		"quality_policy":        map[string]any{"minimum_score": 90},
+		"overseer_config": map[string]any{
+			"scan_interval_hours": 12,
+			"scan_focus":          []string{"security", "test_coverage", "code_quality"},
+			"product_context":     "Internal AI-native mission control fork for autonomous software delivery",
+			"quality_bar":         []string{"tests_required", "docs_updated", "merge_safe"},
+			"priority_weights": map[string]any{
+				"security":      10,
+				"architecture":  7,
+				"documentation": 4,
+			},
+			"max_issues_per_run": 3,
+			"require_approval":   true,
+		},
 	})
 	req = withURLParam(req, "id", project.ID)
 	callUpsertProjectControl(t, w, req)
@@ -197,6 +239,12 @@ func TestProjectControlUpsert(t *testing.T) {
 	if created.OverseerAgentID == nil || *created.OverseerAgentID != overseerAgentID {
 		t.Fatalf("UpsertProjectControl create: expected overseer_agent_id %q, got %v", overseerAgentID, created.OverseerAgentID)
 	}
+	if created.OverseerAutopilotID == nil {
+		t.Fatalf("UpsertProjectControl create: expected overseer_autopilot_id to be populated")
+	}
+	autonomyDetails := loadProjectLinkedOverseerAutonomyDetails(t, project.ID)
+	assertProjectControlAutonomyResponse(t, created, autonomyDetails)
+	assertProjectLinkedOverseerAutopilot(t, project.ID, overseerAgentID, *created.OverseerAutopilotID, "0 */12 * * *")
 	if created.DefaultPipelineID == nil || *created.DefaultPipelineID != pipelineID {
 		t.Fatalf("UpsertProjectControl create: expected default_pipeline_id %q, got %v", pipelineID, created.DefaultPipelineID)
 	}
@@ -211,6 +259,15 @@ func TestProjectControlUpsert(t *testing.T) {
 	}
 	assertJSONEqual(t, created.ReviewPolicy, `{"required_reviewers":2}`)
 	assertJSONEqual(t, created.QualityPolicy, `{"minimum_score":90}`)
+	assertJSONEqual(t, created.OverseerConfig, `{
+		"scan_interval_hours":12,
+		"scan_focus":["security","test_coverage","code_quality"],
+		"product_context":"Internal AI-native mission control fork for autonomous software delivery",
+		"quality_bar":["tests_required","docs_updated","merge_safe"],
+		"priority_weights":{"security":10,"architecture":7,"documentation":4},
+		"max_issues_per_run":3,
+		"require_approval":true
+	}`)
 
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/projects/"+project.ID+"/control", map[string]any{
@@ -230,6 +287,12 @@ func TestProjectControlUpsert(t *testing.T) {
 	if cleared.OverseerAgentID != nil {
 		t.Fatalf("UpsertProjectControl clear IDs: expected nil overseer_agent_id, got %v", *cleared.OverseerAgentID)
 	}
+	if cleared.OverseerAutopilotID == nil {
+		t.Fatalf("UpsertProjectControl clear IDs: expected managed overseer autopilot link to remain present")
+	}
+	autonomyDetails = loadProjectLinkedOverseerAutonomyDetails(t, project.ID)
+	assertProjectControlAutonomyResponse(t, cleared, autonomyDetails)
+	assertProjectLinkedOverseerAutopilotPaused(t, project.ID, *cleared.OverseerAutopilotID)
 	if cleared.DefaultPipelineID != nil {
 		t.Fatalf("UpsertProjectControl clear IDs: expected nil default_pipeline_id, got %v", *cleared.DefaultPipelineID)
 	}
@@ -241,6 +304,15 @@ func TestProjectControlUpsert(t *testing.T) {
 	}
 	assertJSONEqual(t, cleared.ReviewPolicy, `{"required_reviewers":2}`)
 	assertJSONEqual(t, cleared.QualityPolicy, `{"minimum_score":90}`)
+	assertJSONEqual(t, cleared.OverseerConfig, `{
+		"scan_interval_hours":12,
+		"scan_focus":["security","test_coverage","code_quality"],
+		"product_context":"Internal AI-native mission control fork for autonomous software delivery",
+		"quality_bar":["tests_required","docs_updated","merge_safe"],
+		"priority_weights":{"security":10,"architecture":7,"documentation":4},
+		"max_issues_per_run":3,
+		"require_approval":true
+	}`)
 
 	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/projects/"+project.ID+"/control", nil)
@@ -257,9 +329,24 @@ func TestProjectControlUpsert(t *testing.T) {
 	if fetched.OverseerAgentID != nil || fetched.DefaultPipelineID != nil {
 		t.Fatalf("GetProjectControl after upsert: expected cleared IDs, got %+v", fetched)
 	}
+	if fetched.OverseerAutopilotID == nil {
+		t.Fatalf("GetProjectControl after upsert: expected overseer_autopilot_id to remain linked")
+	}
+	autonomyDetails = loadProjectLinkedOverseerAutonomyDetails(t, project.ID)
+	assertProjectControlAutonomyResponse(t, fetched, autonomyDetails)
+	assertProjectLinkedOverseerAutopilotPaused(t, project.ID, *fetched.OverseerAutopilotID)
 	if fetched.AutomationMode != "assisted" || fetched.StaleAfterMinutes != 120 {
 		t.Fatalf("GetProjectControl after upsert: expected persisted values, got %+v", fetched)
 	}
+	assertJSONEqual(t, fetched.OverseerConfig, `{
+		"scan_interval_hours":12,
+		"scan_focus":["security","test_coverage","code_quality"],
+		"product_context":"Internal AI-native mission control fork for autonomous software delivery",
+		"quality_bar":["tests_required","docs_updated","merge_safe"],
+		"priority_weights":{"security":10,"architecture":7,"documentation":4},
+		"max_issues_per_run":3,
+		"require_approval":true
+	}`)
 }
 
 func TestProjectControlRejectsOverseerOutsideWorkspace(t *testing.T) {
@@ -332,36 +419,62 @@ func TestProjectControlRejectsNonPositiveStaleAfterMinutes(t *testing.T) {
 	}
 }
 
-func TestProjectControlRejectsNonObjectPolicies(t *testing.T) {
-	project := createPipelineTestProject(t, "Project control invalid policies")
+func TestProjectControlRejectsInvalidOverseerConfig(t *testing.T) {
+	project := createPipelineTestProject(t, "Project control invalid overseer config")
 
-	t.Run("review_policy", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req := newRequest("PUT", "/api/projects/"+project.ID+"/control", map[string]any{
-			"review_policy": []string{"not", "an", "object"},
-		})
-		req = withURLParam(req, "id", project.ID)
-		callUpsertProjectControl(t, w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("UpsertProjectControl invalid review_policy: expected 400, got %d: %s", w.Code, w.Body.String())
-		}
-		if !strings.Contains(strings.ToLower(w.Body.String()), "review_policy") {
-			t.Fatalf("UpsertProjectControl invalid review_policy: expected error to mention review_policy, got %q", w.Body.String())
-		}
-	})
+	tests := []struct {
+		name      string
+		body      string
+		errorHint string
+	}{
+		{
+			name:      "scan_interval_hours out of range",
+			body:      `{"overseer_config":{"scan_interval_hours":5}}`,
+			errorHint: "scan_interval_hours",
+		},
+		{
+			name:      "scan_focus invalid value",
+			body:      `{"overseer_config":{"scan_focus":["security","chaos"]}}`,
+			errorHint: "scan_focus",
+		},
+		{
+			name:      "product_context too long",
+			body:      `{"overseer_config":{"product_context":"................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................................."}}`,
+			errorHint: "product_context",
+		},
+		{
+			name:      "max_issues_per_run too high",
+			body:      `{"overseer_config":{"max_issues_per_run":4}}`,
+			errorHint: "max_issues_per_run",
+		},
+		{
+			name:      "require_approval wrong type",
+			body:      `{"overseer_config":{"require_approval":"yes"}}`,
+			errorHint: "require_approval",
+		},
+		{
+			name:      "priority_weights wrong shape",
+			body:      `{"overseer_config":{"priority_weights":[1,2,3]}}`,
+			errorHint: "priority_weights",
+		},
+	}
 
-	t.Run("quality_policy", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		req := newRequest("PUT", "/api/projects/"+project.ID+"/control", map[string]any{
-			"quality_policy": []string{"not", "an", "object"},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest("PUT", "/api/projects/"+project.ID+"/control", strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-User-ID", testUserID)
+			req.Header.Set("X-Workspace-ID", testWorkspaceID)
+			req = withURLParam(req, "id", project.ID)
+
+			callUpsertProjectControl(t, w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("UpsertProjectControl invalid overseer_config (%s): expected 400, got %d: %s", tt.name, w.Code, w.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(w.Body.String()), tt.errorHint) {
+				t.Fatalf("UpsertProjectControl invalid overseer_config (%s): expected error to mention %q, got %q", tt.name, tt.errorHint, w.Body.String())
+			}
 		})
-		req = withURLParam(req, "id", project.ID)
-		callUpsertProjectControl(t, w, req)
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("UpsertProjectControl invalid quality_policy: expected 400, got %d: %s", w.Code, w.Body.String())
-		}
-		if !strings.Contains(strings.ToLower(w.Body.String()), "quality_policy") {
-			t.Fatalf("UpsertProjectControl invalid quality_policy: expected error to mention quality_policy, got %q", w.Body.String())
-		}
-	})
+	}
 }

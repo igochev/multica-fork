@@ -8,6 +8,7 @@ import { ProjectDetail } from "./project-detail";
 
 const mockUpdateProjectControl = vi.fn();
 const mockReconcileProjectControl = vi.fn();
+const mockReconcileProjectOverseer = vi.fn();
 
 const project: Project = {
   id: "project-1",
@@ -28,6 +29,16 @@ const project: Project = {
 const projectControl: ProjectControl = {
   project_id: "project-1",
   overseer_agent_id: "agent-1",
+  overseer_autopilot_id: "autopilot-9",
+  overseer_autonomy_status: "active",
+  overseer_autonomy_trigger_id: "trigger-1",
+  overseer_autonomy_next_run_at: "2026-01-02T06:00:00Z",
+  overseer_autonomy: {
+    autopilot_id: "autopilot-9",
+    status: "active",
+    trigger_id: "trigger-1",
+    next_run_at: "2026-01-02T06:00:00Z",
+  },
   default_pipeline_id: "pipeline-1",
   automation_mode: "assisted",
   auto_triage_enabled: true,
@@ -36,6 +47,18 @@ const projectControl: ProjectControl = {
   stale_after_minutes: 120,
   review_policy: null,
   quality_policy: null,
+  overseer_config: {
+    scan_interval_hours: 12,
+    scan_focus: ["security", "documentation"],
+    product_context: "Protect customer-facing releases and checkout quality.",
+    quality_bar: ["Zero regressions", "Clear owner"],
+    priority_weights: {
+      impact: 5,
+      urgency: 3,
+    },
+    max_issues_per_run: 4,
+    require_approval: true,
+  },
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -65,6 +88,7 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Alpha Workspace", slug: "alpha" }),
   useWorkspacePaths: () => ({
     projects: () => "/alpha/projects",
+    autopilotDetail: (id: string) => `/alpha/autopilots/${id}`,
   }),
 }));
 
@@ -97,6 +121,10 @@ vi.mock("@multica/core/project-control", () => ({
   }),
   useReconcileProjectControl: () => ({
     mutate: mockReconcileProjectControl,
+    isPending: false,
+  }),
+  useReconcileProjectOverseer: () => ({
+    mutate: mockReconcileProjectOverseer,
     isPending: false,
   }),
 }));
@@ -239,22 +267,184 @@ describe("ProjectDetail automation controls", () => {
     vi.clearAllMocks();
   });
 
-  it("renders automation controls and saves toggle changes through the mutation", async () => {
+  it("renders strategic overseer config values and linked autonomy status", async () => {
     renderProjectDetail();
 
     expect(await screen.findByText("Automation")).toBeInTheDocument();
     expect(screen.getByText("Overseer")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Overseer" })).toBeInTheDocument();
-    expect(screen.getByText("Default pipeline")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Default pipeline" })).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: "Scan interval hours" })).toHaveValue(12);
+    expect(screen.getByRole("checkbox", { name: "Security" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Documentation" })).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "Product context" })).toHaveValue(
+      "Protect customer-facing releases and checkout quality.",
+    );
+    expect(screen.getByRole("textbox", { name: "Quality bar" })).toHaveValue("Zero regressions\nClear owner");
+    expect(screen.getByRole("textbox", { name: "Priority weights" })).toHaveValue(`{
+  "impact": 5,
+  "urgency": 3
+}`);
+    expect(screen.getByRole("spinbutton", { name: "Max issues per run" })).toHaveValue(4);
+    expect(screen.getByRole("switch", { name: "Require approval" })).toBeChecked();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.getByText("2026-01-02T06:00:00Z")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open linked autopilot" })).toHaveAttribute(
+      "href",
+      "/alpha/autopilots/autopilot-9",
+    );
+  });
 
+  it("saves overseer config field changes through the mutation", async () => {
+    renderProjectDetail();
+
+    fireEvent.change(await screen.findByRole("spinbutton", { name: "Scan interval hours" }), {
+      target: { value: "24" },
+    });
+    fireEvent.blur(screen.getByRole("spinbutton", { name: "Scan interval hours" }));
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Documentation" }));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Quality bar" }), {
+      target: { value: "Zero regressions\nFast rollback" },
+    });
+    fireEvent.blur(screen.getByRole("textbox", { name: "Quality bar" }));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Priority weights" }), {
+      target: { value: '{"impact":7,"confidence":2}' },
+    });
+    fireEvent.blur(screen.getByRole("textbox", { name: "Priority weights" }));
+
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Max issues per run" }), {
+      target: { value: "6" },
+    });
+    fireEvent.blur(screen.getByRole("spinbutton", { name: "Max issues per run" }));
+
+    fireEvent.click(screen.getByRole("switch", { name: "Require approval" }));
     fireEvent.click(screen.getByRole("switch", { name: /auto-escalate blocked/i }));
 
     await waitFor(() => {
       expect(mockUpdateProjectControl).toHaveBeenCalledWith({
         id: "project-1",
-        data: { auto_escalate_blocked: false },
+        data: {
+          overseer_config: {
+            scan_interval_hours: 24,
+            scan_focus: ["security", "documentation"],
+            product_context: "Protect customer-facing releases and checkout quality.",
+            quality_bar: ["Zero regressions", "Clear owner"],
+            priority_weights: {
+              impact: 5,
+              urgency: 3,
+            },
+            max_issues_per_run: 4,
+            require_approval: true,
+          },
+        },
       });
     });
+
+    expect(mockUpdateProjectControl).toHaveBeenCalledWith({
+      id: "project-1",
+      data: {
+        overseer_config: {
+          scan_interval_hours: 12,
+          scan_focus: ["security"],
+          product_context: "Protect customer-facing releases and checkout quality.",
+          quality_bar: ["Zero regressions", "Clear owner"],
+          priority_weights: {
+            impact: 5,
+            urgency: 3,
+          },
+          max_issues_per_run: 4,
+          require_approval: true,
+        },
+      },
+    });
+
+    expect(mockUpdateProjectControl).toHaveBeenCalledWith({
+      id: "project-1",
+      data: {
+        overseer_config: {
+          scan_interval_hours: 12,
+          scan_focus: ["security", "documentation"],
+          product_context: "Protect customer-facing releases and checkout quality.",
+          quality_bar: ["Zero regressions", "Fast rollback"],
+          priority_weights: {
+            impact: 5,
+            urgency: 3,
+          },
+          max_issues_per_run: 4,
+          require_approval: true,
+        },
+      },
+    });
+
+    expect(mockUpdateProjectControl).toHaveBeenCalledWith({
+      id: "project-1",
+      data: {
+        overseer_config: {
+          scan_interval_hours: 12,
+          scan_focus: ["security", "documentation"],
+          product_context: "Protect customer-facing releases and checkout quality.",
+          quality_bar: ["Zero regressions", "Clear owner"],
+          priority_weights: {
+            impact: 7,
+            confidence: 2,
+          },
+          max_issues_per_run: 4,
+          require_approval: true,
+        },
+      },
+    });
+
+    expect(mockUpdateProjectControl).toHaveBeenCalledWith({
+      id: "project-1",
+      data: {
+        overseer_config: {
+          scan_interval_hours: 12,
+          scan_focus: ["security", "documentation"],
+          product_context: "Protect customer-facing releases and checkout quality.",
+          quality_bar: ["Zero regressions", "Clear owner"],
+          priority_weights: {
+            impact: 5,
+            urgency: 3,
+          },
+          max_issues_per_run: 6,
+          require_approval: true,
+        },
+      },
+    });
+
+    expect(mockUpdateProjectControl).toHaveBeenCalledWith({
+      id: "project-1",
+      data: {
+        overseer_config: {
+          scan_interval_hours: 12,
+          scan_focus: ["security", "documentation"],
+          product_context: "Protect customer-facing releases and checkout quality.",
+          quality_bar: ["Zero regressions", "Clear owner"],
+          priority_weights: {
+            impact: 5,
+            urgency: 3,
+          },
+          max_issues_per_run: 4,
+          require_approval: false,
+        },
+      },
+    });
+
+    expect(mockUpdateProjectControl).toHaveBeenCalledWith({
+      id: "project-1",
+      data: { auto_escalate_blocked: false },
+    });
+  });
+
+  it("triggers the strategic overseer reconcile action", async () => {
+    renderProjectDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reconcile strategic overseer" }));
+
+    expect(mockReconcileProjectOverseer).toHaveBeenCalledWith("project-1");
+    expect(mockReconcileProjectControl).not.toHaveBeenCalled();
   });
 });

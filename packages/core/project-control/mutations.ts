@@ -44,3 +44,15 @@ export function useReconcileProjectControl() {
     },
   });
 }
+
+export function useReconcileProjectOverseer() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (id: string) => api.reconcileProjectOverseer(id),
+    onSettled: (_data, _error, id) => {
+      qc.invalidateQueries({ queryKey: projectControlKeys.detail(wsId, id) });
+    },
+  });
+}

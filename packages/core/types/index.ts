@@ -33,7 +33,16 @@ export type { Attachment } from "./attachment";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type { Project, ProjectStatus, ProjectPriority, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "./project";
-export type { ProjectControl, UpdateProjectControlRequest, ReconcileProjectControlResponse } from "./project-control";
+export type {
+  ProjectControl,
+  ProjectOverseerAutonomy,
+  OverseerConfig,
+  OverseerScanFocus,
+  OverseerPriorityWeights,
+  UpdateProjectControlRequest,
+  ReconcileProjectControlResponse,
+  ReconcileProjectOverseerResponse,
+} from "./project-control";
 export type { Pipeline, PipelineStage, PipelineStageRequest, CreatePipelineRequest, UpdatePipelineRequest, ListPipelinesResponse } from "./pipeline";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {

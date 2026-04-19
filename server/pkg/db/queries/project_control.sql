@@ -1,7 +1,10 @@
 -- name: GetProjectControlSettings :one
 SELECT
     p.id AS project_id,
+    p.workspace_id,
+    p.title AS project_title,
     pcs.overseer_agent_id,
+    pcs.overseer_autopilot_id,
     pcs.default_pipeline_id,
     COALESCE(pcs.automation_mode, 'manual') AS automation_mode,
     COALESCE(pcs.auto_triage_enabled, false) AS auto_triage_enabled,
@@ -10,6 +13,7 @@ SELECT
     COALESCE(pcs.stale_after_minutes, 60) AS stale_after_minutes,
     COALESCE(pcs.review_policy, '{}'::jsonb) AS review_policy,
     COALESCE(pcs.quality_policy, '{}'::jsonb) AS quality_policy,
+    COALESCE(pcs.overseer_config, '{}'::jsonb) AS overseer_config,
     COALESCE(pcs.created_at, p.created_at) AS created_at,
     COALESCE(pcs.updated_at, p.updated_at) AS updated_at
 FROM project p
@@ -27,7 +31,8 @@ INSERT INTO project_control_settings (
     auto_escalate_blocked,
     stale_after_minutes,
     review_policy,
-    quality_policy
+    quality_policy,
+    overseer_config
 ) VALUES (
     $1,
     $2,
@@ -38,7 +43,8 @@ INSERT INTO project_control_settings (
     $7,
     $8,
     $9,
-    $10
+    $10,
+    $11
 )
 ON CONFLICT (project_id)
 DO UPDATE SET
@@ -51,7 +57,15 @@ DO UPDATE SET
     stale_after_minutes = EXCLUDED.stale_after_minutes,
     review_policy = EXCLUDED.review_policy,
     quality_policy = EXCLUDED.quality_policy,
+    overseer_config = EXCLUDED.overseer_config,
     updated_at = now()
+RETURNING *;
+
+-- name: UpdateProjectControlOverseerAutopilotLink :one
+UPDATE project_control_settings
+SET overseer_autopilot_id = $2,
+    updated_at = now()
+WHERE project_id = $1
 RETURNING *;
 
 -- name: ListProjectsWithAutomationEnabled :many

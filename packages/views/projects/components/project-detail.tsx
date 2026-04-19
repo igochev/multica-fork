@@ -6,11 +6,11 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, ProjectStatus, ProjectPriority, UpdateProjectControlRequest } from "@multica/core/types";
+import type { Issue, IssueStatus, ProjectStatus, ProjectPriority, UpdateProjectControlRequest, OverseerConfig, OverseerScanFocus } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
-import { projectControlOptions, useUpdateProjectControl, useReconcileProjectControl } from "@multica/core/project-control";
+import { projectControlOptions, useUpdateProjectControl, useReconcileProjectControl, useReconcileProjectOverseer } from "@multica/core/project-control";
 import { pipelineListOptions } from "@multica/core/pipelines";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -111,10 +111,34 @@ const AUTOMATION_MODE_OPTIONS = [
   { value: "autonomous", label: "Autonomous" },
 ] as const;
 
+const SCAN_FOCUS_OPTIONS: ReadonlyArray<{ value: OverseerScanFocus; label: string }> = [
+  { value: "security", label: "Security" },
+  { value: "test_coverage", label: "Test coverage" },
+  { value: "code_quality", label: "Code quality" },
+  { value: "documentation", label: "Documentation" },
+  { value: "architecture", label: "Architecture" },
+];
+
 const NONE_OPTION = "__none__";
 
 function getAutomationModeLabel(mode: string) {
   return AUTOMATION_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode;
+}
+
+function formatPriorityWeights(weights?: OverseerConfig["priority_weights"]) {
+  return weights ? JSON.stringify(weights, null, 2) : "";
+}
+
+function parseMultilineList(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function titleCase(value: string | null | undefined) {
+  if (!value) return "Not linked";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
@@ -222,6 +246,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const deleteProject = useDeleteProject();
   const updateProjectControl = useUpdateProjectControl();
   const reconcileProjectControl = useReconcileProjectControl();
+  const reconcileProjectOverseer = useReconcileProjectOverseer();
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -238,6 +263,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
   const [staleThreshold, setStaleThreshold] = useState("");
+  const [scanIntervalHours, setScanIntervalHours] = useState("");
+  const [scanFocus, setScanFocus] = useState<OverseerScanFocus[]>([]);
+  const [productContext, setProductContext] = useState("");
+  const [qualityBar, setQualityBar] = useState("");
+  const [priorityWeights, setPriorityWeights] = useState("");
+  const [maxIssuesPerRun, setMaxIssuesPerRun] = useState("");
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -274,6 +305,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     setStaleThreshold(projectControl ? String(projectControl.stale_after_minutes) : "");
   }, [projectControl]);
 
+  useEffect(() => {
+    const config = projectControl?.overseer_config;
+    setScanIntervalHours(config?.scan_interval_hours != null ? String(config.scan_interval_hours) : "");
+    setScanFocus(config?.scan_focus ?? []);
+    setProductContext(config?.product_context ?? "");
+    setQualityBar((config?.quality_bar ?? []).join("\n"));
+    setPriorityWeights(formatPriorityWeights(config?.priority_weights));
+    setMaxIssuesPerRun(config?.max_issues_per_run != null ? String(config.max_issues_per_run) : "");
+  }, [projectControl]);
+
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
       if (!project) return;
@@ -299,6 +340,101 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       handleUpdateControl({ stale_after_minutes: normalized });
     }
   }, [handleUpdateControl, projectControl, staleThreshold]);
+
+  const handleUpdateOverseerConfig = useCallback(
+    (overrides: Partial<OverseerConfig>) => {
+      if (!projectControl) return;
+      handleUpdateControl({
+        overseer_config: {
+          ...projectControl.overseer_config,
+          ...overrides,
+        },
+      });
+    },
+    [handleUpdateControl, projectControl],
+  );
+
+  const handleScanIntervalBlur = useCallback(() => {
+    if (!projectControl) return;
+    const currentValue = projectControl.overseer_config.scan_interval_hours;
+    const nextValue = Number.parseInt(scanIntervalHours, 10);
+    if (!Number.isFinite(nextValue) || nextValue <= 0) {
+      setScanIntervalHours(currentValue != null ? String(currentValue) : "");
+      return;
+    }
+    if (nextValue !== currentValue) {
+      handleUpdateOverseerConfig({ scan_interval_hours: nextValue });
+    }
+  }, [handleUpdateOverseerConfig, projectControl, scanIntervalHours]);
+
+  const handleToggleScanFocus = useCallback(
+    (focus: OverseerScanFocus) => {
+      if (!projectControl) return;
+      const currentFocus = projectControl.overseer_config.scan_focus ?? [];
+      const nextFocus = currentFocus.includes(focus)
+        ? currentFocus.filter((item) => item !== focus)
+        : [...currentFocus, focus];
+      setScanFocus(nextFocus);
+      handleUpdateOverseerConfig({ scan_focus: nextFocus });
+    },
+    [handleUpdateOverseerConfig, projectControl],
+  );
+
+  const handleProductContextBlur = useCallback(() => {
+    if (!projectControl) return;
+    const nextValue = productContext.trim();
+    const currentValue = projectControl.overseer_config.product_context ?? "";
+    if (nextValue !== currentValue) {
+      handleUpdateOverseerConfig({ product_context: nextValue });
+    }
+  }, [handleUpdateOverseerConfig, productContext, projectControl]);
+
+  const handleQualityBarBlur = useCallback(() => {
+    if (!projectControl) return;
+    const nextValue = parseMultilineList(qualityBar);
+    const currentValue = projectControl.overseer_config.quality_bar ?? [];
+    if (JSON.stringify(nextValue) !== JSON.stringify(currentValue)) {
+      handleUpdateOverseerConfig({ quality_bar: nextValue });
+    }
+  }, [handleUpdateOverseerConfig, projectControl, qualityBar]);
+
+  const handlePriorityWeightsBlur = useCallback(() => {
+    if (!projectControl) return;
+    const raw = priorityWeights.trim();
+    const currentValue = projectControl.overseer_config.priority_weights;
+    if (!raw) {
+      if (currentValue) {
+        handleUpdateOverseerConfig({ priority_weights: {} });
+      }
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as OverseerConfig["priority_weights"];
+      handleUpdateOverseerConfig({ priority_weights: parsed ?? {} });
+    } catch {
+      setPriorityWeights(formatPriorityWeights(currentValue));
+    }
+  }, [handleUpdateOverseerConfig, priorityWeights, projectControl]);
+
+  const handleMaxIssuesPerRunBlur = useCallback(() => {
+    if (!projectControl) return;
+    const currentValue = projectControl.overseer_config.max_issues_per_run;
+    const nextValue = Number.parseInt(maxIssuesPerRun, 10);
+    if (!Number.isFinite(nextValue) || nextValue <= 0) {
+      setMaxIssuesPerRun(currentValue != null ? String(currentValue) : "");
+      return;
+    }
+    if (nextValue !== currentValue) {
+      handleUpdateOverseerConfig({ max_issues_per_run: nextValue });
+    }
+  }, [handleUpdateOverseerConfig, maxIssuesPerRun, projectControl]);
+
+  const autonomySummary = projectControl?.overseer_autonomy ?? (projectControl?.overseer_autopilot_id ? {
+    autopilot_id: projectControl.overseer_autopilot_id,
+    status: projectControl.overseer_autonomy_status ?? "unknown",
+    trigger_id: projectControl.overseer_autonomy_trigger_id,
+    next_run_at: projectControl.overseer_autonomy_next_run_at,
+  } : null);
 
   const handleDelete = useCallback(() => {
     if (!project) return;
@@ -579,6 +715,122 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 </div>
 
                 <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="project-overseer-scan-interval">Scan interval hours</label>
+                  <Input
+                    id="project-overseer-scan-interval"
+                    aria-label="Scan interval hours"
+                    type="number"
+                    min={1}
+                    value={scanIntervalHours}
+                    onChange={(event) => setScanIntervalHours(event.target.value)}
+                    onBlur={handleScanIntervalBlur}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium text-muted-foreground">Scan focus</div>
+                  <div className="grid grid-cols-1 gap-2 rounded-md border border-border/60 px-3 py-2">
+                    {SCAN_FOCUS_OPTIONS.map((option) => (
+                      <label key={option.value} className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          aria-label={option.label}
+                          checked={scanFocus.includes(option.value)}
+                          onChange={() => handleToggleScanFocus(option.value)}
+                        />
+                        <span>{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="project-overseer-product-context">Product context</label>
+                  <textarea
+                    id="project-overseer-product-context"
+                    aria-label="Product context"
+                    value={productContext}
+                    onChange={(event) => setProductContext(event.target.value)}
+                    onBlur={handleProductContextBlur}
+                    className="min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="project-overseer-quality-bar">Quality bar</label>
+                  <textarea
+                    id="project-overseer-quality-bar"
+                    aria-label="Quality bar"
+                    value={qualityBar}
+                    onChange={(event) => setQualityBar(event.target.value)}
+                    onBlur={handleQualityBarBlur}
+                    className="min-h-20 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  />
+                  <p className="text-[11px] text-muted-foreground">One quality bar per line.</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="project-overseer-priority-weights">Priority weights</label>
+                  <textarea
+                    id="project-overseer-priority-weights"
+                    aria-label="Priority weights"
+                    value={priorityWeights}
+                    onChange={(event) => setPriorityWeights(event.target.value)}
+                    onBlur={handlePriorityWeightsBlur}
+                    className="min-h-24 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground" htmlFor="project-overseer-max-issues">Max issues per run</label>
+                  <Input
+                    id="project-overseer-max-issues"
+                    aria-label="Max issues per run"
+                    type="number"
+                    min={1}
+                    value={maxIssuesPerRun}
+                    onChange={(event) => setMaxIssuesPerRun(event.target.value)}
+                    onBlur={handleMaxIssuesPerRunBlur}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2">
+                  <div>
+                    <div className="text-xs font-medium">Require approval</div>
+                    <div className="text-[11px] text-muted-foreground">Require approval before strategic overseer output is applied.</div>
+                  </div>
+                  <Switch
+                    aria-label="Require approval"
+                    checked={projectControl.overseer_config.require_approval ?? false}
+                    onCheckedChange={(checked) => handleUpdateOverseerConfig({ require_approval: checked })}
+                  />
+                </div>
+
+                <div className="space-y-2 rounded-md border border-border/60 px-3 py-2">
+                  <div className="text-xs font-medium">Linked autonomy</div>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-muted-foreground">State</span>
+                    <span>{titleCase(autonomySummary?.status ?? projectControl.overseer_autonomy_status)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 text-xs">
+                    <span className="text-muted-foreground">Next run</span>
+                    <span>{autonomySummary?.next_run_at ?? projectControl.overseer_autonomy_next_run_at ?? "Not scheduled"}</span>
+                  </div>
+                  {(autonomySummary?.autopilot_id || projectControl.overseer_autopilot_id) && (
+                    <div className="flex justify-end">
+                      <AppLink
+                        href={wsPaths.autopilotDetail(autonomySummary?.autopilot_id ?? projectControl.overseer_autopilot_id ?? "")}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                        aria-label="Open linked autopilot"
+                      >
+                        <Link2 className="h-3.5 w-3.5" />
+                        <span>Open linked autopilot</span>
+                      </AppLink>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Stale threshold</label>
                   <Input
                     aria-label="Stale threshold"
@@ -590,6 +842,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   />
                   <p className="text-[11px] text-muted-foreground">Minutes before blocked work is considered stale.</p>
                 </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => reconcileProjectOverseer.mutate(projectId)}
+                  disabled={reconcileProjectOverseer.isPending}
+                >
+                  {reconcileProjectOverseer.isPending ? "Reconciling..." : "Reconcile strategic overseer"}
+                </Button>
 
                 <Button
                   variant="outline"

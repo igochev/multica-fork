@@ -104,6 +104,32 @@ Grounded in: `server/internal/daemon/execenv/execenv_test.go` — provider-speci
 - The Reviewer reads the plan file for compliance checking
 - This makes plans version-controlled, diffable, and reviewable
 
+### Builder → Reviewer contract conclusion (2026-04-19)
+
+The review contract is operational, not magical:
+- **Repo access is automatic** once the reviewer checks out the repo.
+- **Plan path discovery is not automatic** and therefore requires an issue comment convention.
+- **No daemon change is required** for reviewers to read the plan file.
+
+Use this exact rule:
+```markdown
+Before reviewing code, you must:
+1. Read the issue comments and find the canonical plan path posted by the Builder.
+2. Check out the repository if it is not already present.
+3. Read the plan file from the repo.
+4. Review code changes against that plan first, then against general code quality.
+5. Report explicit deviations from the plan.
+```
+
+Use this exact discovery convention in the Builder's issue comment:
+```markdown
+Plan path: docs/plans/{issue-slug}.md
+Review contract: this file is canonical.
+```
+
+Canonical prompts and this reviewer contract now live in `docs/operations/elite-agent-instructions.md`
+with a focused copy in `docs/operations/reviewer-plan-contract.md`.
+
 ---
 
 ## No New Agents Needed — Roles Are Prompts (2026-04-19)

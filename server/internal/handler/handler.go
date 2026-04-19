@@ -37,11 +37,12 @@ type Handler struct {
 	TxStarter        txStarter
 	Hub              *realtime.Hub
 	Bus              *events.Bus
-	TaskService      *service.TaskService
-	PipelineService  *service.PipelineService
-	OverseerService  *service.OverseerService
-	AutopilotService *service.AutopilotService
-	EmailService     *service.EmailService
+	TaskService                    *service.TaskService
+	PipelineService                *service.PipelineService
+	OverseerService                *service.OverseerService
+	AutopilotService               *service.AutopilotService
+	ProjectOverseerAutonomyService *service.ProjectOverseerAutonomyService
+	EmailService                   *service.EmailService
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
 	Storage          storage.Storage
@@ -57,17 +58,20 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	taskSvc := service.NewTaskService(queries, hub, bus)
 	pipelineSvc := service.NewPipelineService(queries, taskSvc)
 	overseerSvc := service.NewOverseerService(queries, taskSvc)
+	autopilotSvc := service.NewAutopilotService(queries, txStarter, bus, taskSvc)
+	projectOverseerAutonomySvc := service.NewProjectOverseerAutonomyService(queries)
 	return &Handler{
-		Queries:          queries,
-		DB:               executor,
-		TxStarter:        txStarter,
-		Hub:              hub,
-		Bus:              bus,
-		TaskService:      taskSvc,
-		PipelineService:  pipelineSvc,
-		OverseerService:  overseerSvc,
-		AutopilotService: service.NewAutopilotService(queries, txStarter, bus, taskSvc),
-		EmailService:     emailService,
+		Queries:                       queries,
+		DB:                            executor,
+		TxStarter:                     txStarter,
+		Hub:                           hub,
+		Bus:                           bus,
+		TaskService:                   taskSvc,
+		PipelineService:               pipelineSvc,
+		OverseerService:               overseerSvc,
+		AutopilotService:              autopilotSvc,
+		ProjectOverseerAutonomyService: projectOverseerAutonomySvc,
+		EmailService:                  emailService,
 		PingStore:        NewPingStore(),
 		UpdateStore:      NewUpdateStore(),
 		Storage:          store,

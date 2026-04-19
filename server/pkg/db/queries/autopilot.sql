@@ -16,6 +16,12 @@ WHERE id = $1;
 SELECT * FROM autopilot
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetProjectLinkedOverseerAutopilot :one
+SELECT a.*
+FROM project_control_settings pcs
+JOIN autopilot a ON a.id = pcs.overseer_autopilot_id
+WHERE pcs.project_id = $1;
+
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, project_id, title, description, assignee_id,

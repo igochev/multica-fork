@@ -233,6 +233,139 @@ func assertJSONEqual(t *testing.T, got []byte, want string) {
 	}
 }
 
+func assertProjectLinkedOverseerAutopilot(t *testing.T, projectID, overseerAgentID, autopilotID, cron string) {
+	t.Helper()
+
+	ctx := context.Background()
+	var storedAutopilotID, storedAssigneeID, status, executionMode, issueTitleTemplate, cronExpression, timezone string
+	if err := testPool.QueryRow(ctx, `
+		SELECT pcs.overseer_autopilot_id::text, a.assignee_id::text, a.status, a.execution_mode, a.issue_title_template,
+		       t.cron_expression, t.timezone
+		FROM project_control_settings pcs
+		JOIN autopilot a ON a.id = pcs.overseer_autopilot_id
+		JOIN autopilot_trigger t ON t.autopilot_id = a.id AND t.kind = 'schedule'
+		WHERE pcs.project_id = $1
+	`, projectID).Scan(&storedAutopilotID, &storedAssigneeID, &status, &executionMode, &issueTitleTemplate, &cronExpression, &timezone); err != nil {
+		t.Fatalf("load linked overseer autopilot: %v", err)
+	}
+	if storedAutopilotID != autopilotID {
+		t.Fatalf("expected linked autopilot_id %q, got %q", autopilotID, storedAutopilotID)
+	}
+	if storedAssigneeID != overseerAgentID {
+		t.Fatalf("expected linked assignee_id %q, got %q", overseerAgentID, storedAssigneeID)
+	}
+	if status != "active" {
+		t.Fatalf("expected linked autopilot status active, got %q", status)
+	}
+	if executionMode != "create_issue" {
+		t.Fatalf("expected linked execution_mode create_issue, got %q", executionMode)
+	}
+	if issueTitleTemplate != "Strategic Overseer Scan — {{date}}" {
+		t.Fatalf("expected linked issue_title_template, got %q", issueTitleTemplate)
+	}
+	if cronExpression != cron {
+		t.Fatalf("expected linked cron_expression %q, got %q", cron, cronExpression)
+	}
+	if timezone != "UTC" {
+		t.Fatalf("expected linked timezone UTC, got %q", timezone)
+	}
+}
+
+func assertProjectLinkedOverseerAutopilotPaused(t *testing.T, projectID, autopilotID string) {
+	t.Helper()
+
+	ctx := context.Background()
+	var storedAutopilotID, status string
+	var triggerEnabled bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT pcs.overseer_autopilot_id::text, a.status, t.enabled
+		FROM project_control_settings pcs
+		JOIN autopilot a ON a.id = pcs.overseer_autopilot_id
+		JOIN autopilot_trigger t ON t.autopilot_id = a.id AND t.kind = 'schedule'
+		WHERE pcs.project_id = $1
+	`, projectID).Scan(&storedAutopilotID, &status, &triggerEnabled); err != nil {
+		t.Fatalf("load paused linked overseer autopilot: %v", err)
+	}
+	if storedAutopilotID != autopilotID {
+		t.Fatalf("expected linked paused autopilot_id %q, got %q", autopilotID, storedAutopilotID)
+	}
+	if status != "paused" {
+		t.Fatalf("expected linked autopilot status paused, got %q", status)
+	}
+	if triggerEnabled {
+		t.Fatal("expected paused linked autopilot trigger to be disabled")
+	}
+}
+
+type projectOverseerAutonomyDetails struct {
+	AutopilotID string
+	Status      string
+	TriggerID   *string
+	NextRunAt   *string
+}
+
+func loadProjectLinkedOverseerAutonomyDetails(t *testing.T, projectID string) projectOverseerAutonomyDetails {
+	t.Helper()
+
+	ctx := context.Background()
+	var details projectOverseerAutonomyDetails
+	if err := testPool.QueryRow(ctx, `
+		SELECT pcs.overseer_autopilot_id::text,
+		       a.status,
+		       t.id::text,
+		       CASE
+		         WHEN t.next_run_at IS NULL THEN NULL
+		         ELSE to_char(t.next_run_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+		       END AS next_run_at
+		FROM project_control_settings pcs
+		JOIN autopilot a ON a.id = pcs.overseer_autopilot_id
+		LEFT JOIN autopilot_trigger t ON t.autopilot_id = a.id AND t.kind = 'schedule'
+		WHERE pcs.project_id = $1
+	`, projectID).Scan(&details.AutopilotID, &details.Status, &details.TriggerID, &details.NextRunAt); err != nil {
+		t.Fatalf("load linked overseer autonomy details: %v", err)
+	}
+	return details
+}
+
+func assertProjectControlAutonomyResponse(t *testing.T, got projectControlResponse, want projectOverseerAutonomyDetails) {
+	t.Helper()
+
+	if got.OverseerAutopilotID == nil || *got.OverseerAutopilotID != want.AutopilotID {
+		t.Fatalf("expected overseer_autopilot_id %q, got %v", want.AutopilotID, got.OverseerAutopilotID)
+	}
+	if got.OverseerAutonomyStatus == nil || *got.OverseerAutonomyStatus != want.Status {
+		t.Fatalf("expected overseer_autonomy_status %q, got %v", want.Status, got.OverseerAutonomyStatus)
+	}
+	if stringPtrValue(got.OverseerAutonomyTriggerID) != stringPtrValue(want.TriggerID) {
+		t.Fatalf("expected overseer_autonomy_trigger_id %v, got %v", want.TriggerID, got.OverseerAutonomyTriggerID)
+	}
+	if stringPtrValue(got.OverseerAutonomyNextRunAt) != stringPtrValue(want.NextRunAt) {
+		t.Fatalf("expected overseer_autonomy_next_run_at %v, got %v", want.NextRunAt, got.OverseerAutonomyNextRunAt)
+	}
+	if got.OverseerAutonomy == nil {
+		t.Fatal("expected overseer_autonomy to be populated")
+	}
+	if got.OverseerAutonomy.AutopilotID != want.AutopilotID {
+		t.Fatalf("expected overseer_autonomy.autopilot_id %q, got %q", want.AutopilotID, got.OverseerAutonomy.AutopilotID)
+	}
+	if got.OverseerAutonomy.Status != want.Status {
+		t.Fatalf("expected overseer_autonomy.status %q, got %q", want.Status, got.OverseerAutonomy.Status)
+	}
+	if stringPtrValue(got.OverseerAutonomy.TriggerID) != stringPtrValue(want.TriggerID) {
+		t.Fatalf("expected overseer_autonomy.trigger_id %v, got %v", want.TriggerID, got.OverseerAutonomy.TriggerID)
+	}
+	if stringPtrValue(got.OverseerAutonomy.NextRunAt) != stringPtrValue(want.NextRunAt) {
+		t.Fatalf("expected overseer_autonomy.next_run_at %v, got %v", want.NextRunAt, got.OverseerAutonomy.NextRunAt)
+	}
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
 func TestIssueCRUD(t *testing.T) {
 	// Create
 	w := httptest.NewRecorder()

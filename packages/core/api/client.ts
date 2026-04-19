@@ -48,6 +48,13 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
+  ProjectControl,
+  UpdateProjectControlRequest,
+  ReconcileProjectControlResponse,
+  Pipeline,
+  CreatePipelineRequest,
+  UpdatePipelineRequest,
+  ListPipelinesResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -798,6 +805,50 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async getProjectControl(id: string): Promise<ProjectControl> {
+    return this.fetch(`/api/projects/${id}/control`);
+  }
+
+  async updateProjectControl(id: string, data: UpdateProjectControlRequest): Promise<ProjectControl> {
+    return this.fetch(`/api/projects/${id}/control`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async reconcileProjectControl(id: string): Promise<ReconcileProjectControlResponse> {
+    return this.fetch(`/api/projects/${id}/control/reconcile`, {
+      method: "POST",
+    });
+  }
+
+  // Pipelines
+  async listPipelines(): Promise<ListPipelinesResponse> {
+    return this.fetch("/api/pipelines");
+  }
+
+  async getPipeline(id: string): Promise<Pipeline> {
+    return this.fetch(`/api/pipelines/${id}`);
+  }
+
+  async createPipeline(data: CreatePipelineRequest): Promise<Pipeline> {
+    return this.fetch("/api/pipelines", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePipeline(id: string, data: UpdatePipelineRequest): Promise<Pipeline> {
+    return this.fetch(`/api/pipelines/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePipeline(id: string): Promise<void> {
+    await this.fetch(`/api/pipelines/${id}`, { method: "DELETE" });
   }
 
   // Pins

@@ -253,6 +253,9 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Route
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Get("/control", h.GetProjectControl)
+					r.Put("/control", h.UpsertProjectControl)
+					r.Post("/control/reconcile", h.ReconcileProjectControl)
 				})
 			})
 

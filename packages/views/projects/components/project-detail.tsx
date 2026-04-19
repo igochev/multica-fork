@@ -6,10 +6,12 @@ import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, 
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { Issue, IssueStatus, ProjectStatus, ProjectPriority, UpdateProjectControlRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
+import { projectControlOptions, useUpdateProjectControl, useReconcileProjectControl } from "@multica/core/project-control";
+import { pipelineListOptions } from "@multica/core/pipelines";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { issueListOptions, childIssueProgressOptions } from "@multica/core/issues/queries";
@@ -34,6 +36,15 @@ import { ListView } from "../../issues/components/list-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Switch } from "@multica/ui/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -93,6 +104,18 @@ function PropRow({
 // ---------------------------------------------------------------------------
 
 const projectViewStore = createIssueViewStore("project_issues_view");
+
+const AUTOMATION_MODE_OPTIONS = [
+  { value: "manual", label: "Manual" },
+  { value: "assisted", label: "Assisted" },
+  { value: "autonomous", label: "Autonomous" },
+] as const;
+
+const NONE_OPTION = "__none__";
+
+function getAutomationModeLabel(mode: string) {
+  return AUTOMATION_MODE_OPTIONS.find((option) => option.value === mode)?.label ?? mode;
+}
 
 function ProjectIssuesContent({ projectIssues }: { projectIssues: Issue[] }) {
   const wsId = useWorkspaceId();
@@ -189,12 +212,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
   const { data: project, isLoading } = useQuery(projectDetailOptions(wsId, projectId));
+  const { data: projectControl } = useQuery(projectControlOptions(wsId, projectId));
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: pipelines = [] } = useQuery(pipelineListOptions(wsId));
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
+  const updateProjectControl = useUpdateProjectControl();
+  const reconcileProjectControl = useReconcileProjectControl();
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
     enabled: !!userId,
@@ -207,8 +234,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
+  const [automationOpen, setAutomationOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
   const [descriptionOpen, setDescriptionOpen] = useState(true);
+  const [staleThreshold, setStaleThreshold] = useState("");
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -231,10 +260,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery));
   const filteredAgents = agents.filter((a) => !a.archived_at && a.name.toLowerCase().includes(leadQuery));
 
+  const activeAgents = useMemo(
+    () => agents.filter((agent) => !agent.archived_at),
+    [agents],
+  );
+
   const projectIssues = useMemo(
     () => allIssues.filter((i) => i.project_id === projectId),
     [allIssues, projectId],
   );
+
+  useEffect(() => {
+    setStaleThreshold(projectControl ? String(projectControl.stale_after_minutes) : "");
+  }, [projectControl]);
 
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
@@ -243,6 +281,24 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     },
     [project, updateProject],
   );
+
+  const handleUpdateControl = useCallback(
+    (data: UpdateProjectControlRequest) => {
+      if (!projectControl) return;
+      updateProjectControl.mutate({ id: projectId, data });
+    },
+    [projectControl, projectId, updateProjectControl],
+  );
+
+  const handleStaleThresholdBlur = useCallback(() => {
+    if (!projectControl) return;
+    const nextValue = Number.parseInt(staleThreshold, 10);
+    const normalized = Number.isFinite(nextValue) && nextValue >= 0 ? nextValue : projectControl.stale_after_minutes;
+    setStaleThreshold(String(normalized));
+    if (normalized !== projectControl.stale_after_minutes) {
+      handleUpdateControl({ stale_after_minutes: normalized });
+    }
+  }, [handleUpdateControl, projectControl, staleThreshold]);
 
   const handleDelete = useCallback(() => {
     if (!project) return;
@@ -437,6 +493,116 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             </Popover>
           </PropRow>
         </div>}
+      </div>
+
+      {/* Automation */}
+      <div>
+        <button
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${automationOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setAutomationOpen(!automationOpen)}
+        >
+          Automation
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${automationOpen ? "rotate-90" : ""}`} />
+        </button>
+        {automationOpen && (
+          <div className="space-y-3 pl-2">
+            {projectControl ? (
+              <>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Overseer</label>
+                  <Select
+                    value={projectControl.overseer_agent_id ?? NONE_OPTION}
+                    onValueChange={(value) => handleUpdateControl({ overseer_agent_id: value === NONE_OPTION ? null : value })}
+                  >
+                    <SelectTrigger className="w-full" aria-label="Overseer">
+                      <SelectValue>{projectControl.overseer_agent_id ? getActorName("agent", projectControl.overseer_agent_id) : "None"}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      <SelectItem value={NONE_OPTION}>None</SelectItem>
+                      {activeAgents.map((agent) => (
+                        <SelectItem key={agent.id} value={agent.id}>{agent.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Automation mode</label>
+                  <Select
+                    value={projectControl.automation_mode}
+                    onValueChange={(value) => handleUpdateControl({ automation_mode: value })}
+                  >
+                    <SelectTrigger className="w-full" aria-label="Automation mode">
+                      <SelectValue>{getAutomationModeLabel(projectControl.automation_mode)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      {AUTOMATION_MODE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                      {!AUTOMATION_MODE_OPTIONS.some((option) => option.value === projectControl.automation_mode) && (
+                        <SelectItem value={projectControl.automation_mode}>{projectControl.automation_mode}</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Default pipeline</label>
+                  <Select
+                    value={projectControl.default_pipeline_id ?? NONE_OPTION}
+                    onValueChange={(value) => handleUpdateControl({ default_pipeline_id: value === NONE_OPTION ? null : value })}
+                  >
+                    <SelectTrigger className="w-full" aria-label="Default pipeline">
+                      <SelectValue>{pipelines.find((pipeline) => pipeline.id === projectControl.default_pipeline_id)?.name ?? "None"}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="start">
+                      <SelectItem value={NONE_OPTION}>None</SelectItem>
+                      {pipelines.map((pipeline) => (
+                        <SelectItem key={pipeline.id} value={pipeline.id}>{pipeline.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2">
+                  <div>
+                    <div className="text-xs font-medium">Auto-escalate blocked</div>
+                    <div className="text-[11px] text-muted-foreground">Escalate blocked work when it goes stale.</div>
+                  </div>
+                  <Switch
+                    aria-label="Auto-escalate blocked"
+                    checked={projectControl.auto_escalate_blocked}
+                    onCheckedChange={(checked) => handleUpdateControl({ auto_escalate_blocked: checked })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Stale threshold</label>
+                  <Input
+                    aria-label="Stale threshold"
+                    type="number"
+                    min={0}
+                    value={staleThreshold}
+                    onChange={(event) => setStaleThreshold(event.target.value)}
+                    onBlur={handleStaleThresholdBlur}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Minutes before blocked work is considered stale.</p>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => reconcileProjectControl.mutate(projectId)}
+                  disabled={reconcileProjectControl.isPending}
+                >
+                  {reconcileProjectControl.isPending ? "Reconciling..." : "Reconcile stale issues"}
+                </Button>
+              </>
+            ) : (
+              <div className="text-xs text-muted-foreground">Loading automation settings...</div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Progress */}

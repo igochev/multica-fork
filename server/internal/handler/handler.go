@@ -39,6 +39,7 @@ type Handler struct {
 	Bus              *events.Bus
 	TaskService      *service.TaskService
 	PipelineService  *service.PipelineService
+	OverseerService  *service.OverseerService
 	AutopilotService *service.AutopilotService
 	EmailService     *service.EmailService
 	PingStore        *PingStore
@@ -55,6 +56,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 	taskSvc := service.NewTaskService(queries, hub, bus)
 	pipelineSvc := service.NewPipelineService(queries, taskSvc)
+	overseerSvc := service.NewOverseerService(queries, taskSvc)
 	return &Handler{
 		Queries:          queries,
 		DB:               executor,
@@ -63,6 +65,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Bus:              bus,
 		TaskService:      taskSvc,
 		PipelineService:  pipelineSvc,
+		OverseerService:  overseerSvc,
 		AutopilotService: service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:     emailService,
 		PingStore:        NewPingStore(),

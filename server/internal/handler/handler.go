@@ -31,6 +31,12 @@ type dbExecutor interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+type Config struct {
+	AllowSignup         bool
+	AllowedEmails       []string
+	AllowedEmailDomains []string
+}
+
 type Handler struct {
 	Queries          *db.Queries
 	DB               dbExecutor
@@ -45,17 +51,19 @@ type Handler struct {
 	EmailService                   *service.EmailService
 	PingStore        *PingStore
 	UpdateStore      *UpdateStore
+	ModelListStore   *ModelListStore
 	Storage          storage.Storage
 	CFSigner         *auth.CloudFrontSigner
+	cfg              Config
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner) *Handler {
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, cfg Config) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
 	}
 
-	taskSvc := service.NewTaskService(queries, hub, bus)
+	taskSvc := service.NewTaskService(queries, txStarter, hub, bus)
 	pipelineSvc := service.NewPipelineService(queries, taskSvc)
 	overseerSvc := service.NewOverseerService(queries, taskSvc)
 	autopilotSvc := service.NewAutopilotService(queries, txStarter, bus, taskSvc)
@@ -72,10 +80,12 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		AutopilotService:              autopilotSvc,
 		ProjectOverseerAutonomyService: projectOverseerAutonomySvc,
 		EmailService:                  emailService,
-		PingStore:        NewPingStore(),
-		UpdateStore:      NewUpdateStore(),
-		Storage:          store,
-		CFSigner:         cfSigner,
+		PingStore:                     NewPingStore(),
+		UpdateStore:                   NewUpdateStore(),
+		ModelListStore:                NewModelListStore(),
+		Storage:                       store,
+		CFSigner:                      cfSigner,
+		cfg:                           cfg,
 	}
 }
 

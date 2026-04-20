@@ -1,6 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
+export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
+
 export const zh: LandingDict = {
   header: {
     github: "GitHub",
@@ -120,9 +122,10 @@ export const zh: LandingDict = {
     headlineFaded: "\u53ea\u9700\u4e00\u5c0f\u65f6\u3002",
     steps: [
       {
-        title: "\u6ce8\u518c\u5e76\u521b\u5efa\u5de5\u4f5c\u533a",
-        description:
-          "\u8f93\u5165\u90ae\u7bb1\uff0c\u9a8c\u8bc1\u7801\u786e\u8ba4\uff0c\u5373\u53ef\u8fdb\u5165\u3002\u5de5\u4f5c\u533a\u81ea\u52a8\u521b\u5efa\u2014\u2014\u65e0\u9700\u8bbe\u7f6e\u5411\u5bfc\uff0c\u65e0\u9700\u914d\u7f6e\u8868\u5355\u3002",
+        title: ALLOW_SIGNUP ? "注册并创建您的工作空间" : "登录到您的工作空间",
+        description: ALLOW_SIGNUP
+          ? "输入您的邮箱，验证代码后即可使用。工作空间会自动创建——无需设置向导或配置表单。"
+          : "输入您的邮箱，验证代码后即可登录到您的工作空间——无需设置向导或配置表单。",
       },
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
@@ -279,6 +282,23 @@ export const zh: LandingDict = {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.2.7",
+        date: "2026-04-18",
+        title: "编辑器创建子 Issue、自部署门禁与 MCP",
+        changes: [],
+        features: [
+          "直接从编辑器气泡菜单将选中文本创建为子 Issue",
+          "自部署实例账户门禁——`ALLOW_SIGNUP` 和 `ALLOWED_EMAIL_*` 环境变量限制注册",
+          "Agent 新增 `mcp_config` 字段恢复 MCP 支持",
+          "桌面应用每小时检查更新，设置中新增手动检查按钮",
+        ],
+        fixes: [
+          "网页已登录时将会话交接给桌面应用",
+          "修复 `?next=` 开放重定向漏洞",
+          "OpenClaw 停止传递不支持的参数，正确传递 AgentInstructions",
+        ],
+      },
       {
         version: "0.2.5",
         date: "2026-04-17",

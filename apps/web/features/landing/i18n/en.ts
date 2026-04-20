@@ -1,6 +1,8 @@
 import { githubUrl } from "../components/shared";
 import type { LandingDict } from "./types";
 
+export const ALLOW_SIGNUP = process.env.NEXT_PUBLIC_ALLOW_SIGNUP !== "false";
+
 export const en: LandingDict = {
   header: {
     github: "GitHub",
@@ -120,9 +122,10 @@ export const en: LandingDict = {
     headlineFaded: "in the next hour.",
     steps: [
       {
-        title: "Sign up & create your workspace",
-        description:
-          "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms.",
+        title: ALLOW_SIGNUP ? "Sign up & create your workspace" : "Login to your workspace",
+        description: ALLOW_SIGNUP
+          ? "Enter your email, verify with a code, and you\u2019re in. Your workspace is created automatically \u2014 no setup wizard, no configuration forms."
+          : "Enter your email, verify with a code, and you\u2019re logged into your workspace \u2014 no setup wizard, no configuration forms.",
       },
       {
         title: "Install the CLI & connect your machine",
@@ -279,6 +282,23 @@ export const en: LandingDict = {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.2.7",
+        date: "2026-04-18",
+        title: "Sub-Issues from Editor, Self-Host Gating & MCP",
+        changes: [],
+        features: [
+          "Create sub-issue directly from selected text in the editor bubble menu",
+          "Self-hosted instance gating — `ALLOW_SIGNUP` and `ALLOWED_EMAIL_*` env vars to restrict account creation",
+          "Per-agent `mcp_config` field to restore MCP access",
+          "Desktop app hourly update poll with manual check button in settings",
+        ],
+        fixes: [
+          "Session hand-off to desktop when already logged in on web",
+          "Open redirect vulnerability on `?next=` validated",
+          "OpenClaw stops passing unsupported flags and properly delivers AgentInstructions",
+        ],
+      },
       {
         version: "0.2.5",
         date: "2026-04-17",

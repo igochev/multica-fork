@@ -56,14 +56,14 @@ func TimestampToString(t pgtype.Timestamptz) string {
 	if !t.Valid {
 		return ""
 	}
-	return t.Time.Format(time.RFC3339)
+	return t.Time.UTC().Format(time.RFC3339)
 }
 
 func TimestampToPtr(t pgtype.Timestamptz) *string {
 	if !t.Valid {
 		return nil
 	}
-	s := t.Time.Format(time.RFC3339)
+	s := t.Time.UTC().Format(time.RFC3339)
 	return &s
 }
 
